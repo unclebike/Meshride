@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="mesh_green">#FF4CAF50</color>
+    <color name="mesh_orange">#FFFF9800</color>
+    <color name="mesh_grey">#FF9E9E9E</color>
+    <color name="mesh_red">#FFF44336</color>
+    <color name="mesh_bg_dark">#FF1A1A1A</color>
+    <color name="mesh_bg_overlay">#E6000000</color>
+    <color name="mesh_white">#FFFFFFFF</color>
+    <color name="mesh_text_secondary">#FFBDBDBD</color>
+    <color name="mesh_accent">#FF2196F3</color>
+</resources>

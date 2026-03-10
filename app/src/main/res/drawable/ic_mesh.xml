@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <!-- Mesh/radio icon: simplified antenna with signal waves -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,4c1.93,0 3.68,0.78 4.95,2.05l-1.41,1.41C14.63,6.56 13.38,6 12,6s-2.63,0.56 -3.54,1.46L7.05,6.05C8.32,4.78 10.07,4 12,4zM12,8c0.97,0 1.84,0.39 2.47,1.03l-1.41,1.41C12.76,10.15 12.4,10 12,10s-0.76,0.15 -1.06,0.44l-1.41,-1.41C10.16,8.39 11.03,8 12,8zM13,18h-2v-6h2v6z" />
+</vector>

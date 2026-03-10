@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ExtensionInfo
+    id="meshride"
+    displayName="@string/extension_name"
+    icon="@drawable/ic_mesh"
+    scansDevices="true">
+
+    <DataType
+        typeId="mesh-node-count"
+        displayName="@string/data_type_node_count"
+        description="@string/data_type_node_count_desc"
+        icon="@drawable/ic_mesh"
+        graphical="false" />
+
+    <DataType
+        typeId="mesh-last-message"
+        displayName="@string/data_type_last_message"
+        description="@string/data_type_last_message_desc"
+        icon="@drawable/ic_mesh"
+        graphical="true" />
+
+    <BonusAction
+        actionId="send-message-1"
+        displayName="@string/bonus_send_msg_1" />
+
+    <BonusAction
+        actionId="send-message-2"
+        displayName="@string/bonus_send_msg_2" />
+
+    <BonusAction
+        actionId="send-message-3"
+        displayName="@string/bonus_send_msg_3" />
+
+</ExtensionInfo>

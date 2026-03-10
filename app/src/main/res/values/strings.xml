@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MeshRide</string>
+    <string name="extension_name">MeshRide</string>
+
+    <!-- Data Types -->
+    <string name="data_type_node_count">Mesh Node Count</string>
+    <string name="data_type_node_count_desc">Number of Meshtastic nodes on the mesh network</string>
+    <string name="data_type_last_message">Mesh Last Message</string>
+    <string name="data_type_last_message_desc">Last received mesh message with sender info</string>
+
+    <!-- Bonus Actions -->
+    <string name="bonus_send_msg_1">Mesh: Send Message 1</string>
+    <string name="bonus_send_msg_2">Mesh: Send Message 2</string>
+    <string name="bonus_send_msg_3">Mesh: Send Message 3</string>
+
+    <!-- Setup Screen -->
+    <string name="setup_title">MeshRide Setup</string>
+    <string name="scan_devices">Scan for Devices</string>
+    <string name="stop_scan">Stop Scanning</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="paired_device">Paired Device</string>
+    <string name="no_device_paired">No device paired</string>
+    <string name="quick_messages">Quick Messages</string>
+    <string name="save">Save</string>
+    <string name="status">Status</string>
+    <string name="nodes_on_mesh">Nodes on mesh</string>
+    <string name="last_message">Last message</string>
+    <string name="no_messages">No messages received</string>
+    <string name="connection_state">Connection</string>
+
+    <!-- Overlay -->
+    <string name="mesh_message_from">From: %s</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="connected">Connected</string>
+    <string name="scanning_ellipsis">Scanning…</string>
+    <string name="connecting_ellipsis">Connecting…</string>
+    <string name="reconnecting_ellipsis">Reconnecting…</string>
+</resources>
