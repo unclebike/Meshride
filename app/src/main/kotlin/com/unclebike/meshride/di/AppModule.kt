@@ -2,11 +2,12 @@ package com.unclebike.meshride.di
 
 import android.content.Context
 import androidx.room.Room
+import com.unclebike.meshride.BuildConfig
 import com.unclebike.meshride.ble.MeshtasticBleConnection
 import com.unclebike.meshride.ble.MeshtasticConnection
+import com.unclebike.meshride.ble.MockMeshtasticConnection
 import com.unclebike.meshride.data.MessageDao
 import com.unclebike.meshride.data.MeshRideDatabase
-import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,10 +17,15 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-abstract class BleModule {
-    @Binds
+object BleModule {
+    @Provides
     @Singleton
-    abstract fun bindMeshtasticConnection(impl: MeshtasticBleConnection): MeshtasticConnection
+    fun provideMeshtasticConnection(
+        bleConnection: MeshtasticBleConnection,
+        mockConnection: MockMeshtasticConnection,
+    ): MeshtasticConnection {
+        return if (BuildConfig.MOCK_BLE) mockConnection else bleConnection
+    }
 }
 
 @Module
