@@ -44,10 +44,10 @@ class MeshNodeCountDataType(
                             )
                         )
                     )
-                } else if (state == ConnectionState.DISCONNECTED) {
+                } else if (state == ConnectionState.SCANNING || state == ConnectionState.CONNECTING || state == ConnectionState.RECONNECTING) {
                     emitter.onNext(StreamState.Searching)
                 } else {
-                    emitter.onNext(StreamState.Searching)
+                    emitter.onNext(StreamState.NotAvailable)
                 }
                 delay(2000) // Update every 2 seconds
             }
