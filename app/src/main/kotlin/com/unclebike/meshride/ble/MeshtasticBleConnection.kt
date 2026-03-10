@@ -1,6 +1,8 @@
 package com.unclebike.meshride.ble
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.unclebike.meshride.data.ConnectionState
@@ -13,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -20,19 +23,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import no.nordicsemi.kotlin.ble.client.main.callback.ClientBleGatt
-import no.nordicsemi.kotlin.ble.client.main.service.ClientBleGattCharacteristic
-import no.nordicsemi.kotlin.ble.client.main.service.ClientBleGattServices
-import no.nordicsemi.kotlin.ble.core.data.GattConnectionState
+import no.nordicsemi.android.ble.BleManager
+import no.nordicsemi.android.ble.ktx.suspend
+import no.nordicsemi.android.ble.ktx.getNotifications
 import timber.log.Timber
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Real Meshtastic BLE connection using Nordic Android BLE Library (BleManager pattern).
+ * This matches the pattern used by Meshtastic-Android for proven compatibility.
+ */
 @Singleton
 class MeshtasticBleConnection @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -50,7 +57,7 @@ class MeshtasticBleConnection @Inject constructor(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var gattConnection: ClientBleGatt? = null
+    private var bleManager: MeshtasticBleManager? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
     private var readJob: Job? = null
@@ -72,50 +79,63 @@ class MeshtasticBleConnection @Inject constructor(
     private val nodesMap = ConcurrentHashMap<Long, MeshNode>()
 
     @SuppressLint("MissingPermission")
-    override fun startScan(): Flow<ScannedDevice> = flow {
+    override fun startScan(): Flow<ScannedDevice> = callbackFlow {
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter = bluetoothManager.adapter ?: return@flow
+        val adapter = bluetoothManager.adapter ?: run {
+            close()
+            return@callbackFlow
+        }
 
         _connectionState.value = ConnectionState.SCANNING
+        val scanner = adapter.bluetoothLeScanner ?: run {
+            _connectionState.value = ConnectionState.DISCONNECTED
+            close()
+            return@callbackFlow
+        }
 
-        // Use Android's built-in BLE scanner for device discovery
-        val scanner = adapter.bluetoothLeScanner ?: return@flow
         val scanCallback = object : android.bluetooth.le.ScanCallback() {
             override fun onScanResult(callbackType: Int, result: android.bluetooth.le.ScanResult) {
                 val device = result.device
                 val name = device.name ?: return
-                if (name.contains("Meshtastic", ignoreCase = true) || name.contains("Mesh", ignoreCase = true)) {
-                    // Will be emitted via the flow mechanism below
+                if (name.contains("Meshtastic", ignoreCase = true) ||
+                    name.contains("Mesh", ignoreCase = true)
+                ) {
+                    trySend(ScannedDevice(address = device.address, name = name, rssi = result.rssi))
                 }
             }
         }
 
-        val scanFilter = android.bluetooth.le.ScanFilter.Builder()
-            .build()
         val scanSettings = android.bluetooth.le.ScanSettings.Builder()
             .setScanMode(android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        try {
-            scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
-
-            // Also do a paired devices check
-            val bondedDevices = adapter.bondedDevices
-            bondedDevices?.forEach { device ->
-                val name = device.name ?: "Unknown"
-                if (device.uuids?.any { it.uuid == MESHTASTIC_SERVICE_UUID } == true ||
-                    name.contains("Meshtastic", ignoreCase = true) ||
-                    name.contains("Mesh", ignoreCase = true)) {
-                    emit(ScannedDevice(address = device.address, name = name, rssi = -50))
-                }
+        // Also emit bonded devices that look like Meshtastic radios
+        val bondedDevices = adapter.bondedDevices
+        bondedDevices?.forEach { device ->
+            val name = device.name ?: "Unknown"
+            if (device.uuids?.any { it.uuid == MESHTASTIC_SERVICE_UUID } == true ||
+                name.contains("Meshtastic", ignoreCase = true) ||
+                name.contains("Mesh", ignoreCase = true)
+            ) {
+                trySend(ScannedDevice(address = device.address, name = name, rssi = -50))
             }
+        }
 
-            // Keep scanning for a period
-            delay(10000)
-            scanner.stopScan(scanCallback)
+        try {
+            scanner.startScan(null, scanSettings, scanCallback)
         } catch (e: Exception) {
-            Timber.e(e, "Scan failed")
-        } finally {
+            Timber.e(e, "Scan start failed")
+            _connectionState.value = ConnectionState.DISCONNECTED
+            close()
+            return@callbackFlow
+        }
+
+        awaitClose {
+            try {
+                scanner.stopScan(scanCallback)
+            } catch (e: Exception) {
+                Timber.e(e, "Scan stop failed")
+            }
             if (_connectionState.value == ConnectionState.SCANNING) {
                 _connectionState.value = ConnectionState.DISCONNECTED
             }
@@ -146,59 +166,32 @@ class MeshtasticBleConnection @Inject constructor(
                     return@launch
                 }
 
-                val gatt = ClientBleGatt.connect(context, device, scope)
-                gattConnection = gatt
+                val manager = MeshtasticBleManager(context)
+                bleManager = manager
 
-                // Request MTU
-                gatt.requestMtu(MTU_SIZE)
+                // Connect using Nordic BLE library with retry and auto-connect
+                manager.connect(device)
+                    .retry(3, 200)
+                    .useAutoConnect(true)
+                    .suspend()
 
-                // Discover services
-                val services: ClientBleGattServices = gatt.discoverServices()
-                val meshtasticService = services.findService(MESHTASTIC_SERVICE_UUID)
-                if (meshtasticService == null) {
-                    Timber.e("Meshtastic service not found on device")
-                    _connectionState.value = ConnectionState.DISCONNECTED
-                    gatt.disconnect()
-                    return@launch
-                }
-
-                val fromRadio = meshtasticService.findCharacteristic(FROM_RADIO_UUID)
-                val toRadio = meshtasticService.findCharacteristic(TO_RADIO_UUID)
-                val fromNum = meshtasticService.findCharacteristic(FROM_NUM_UUID)
-
-                if (fromRadio == null || toRadio == null || fromNum == null) {
-                    Timber.e("Required characteristics not found")
-                    _connectionState.value = ConnectionState.DISCONNECTED
-                    gatt.disconnect()
-                    return@launch
-                }
+                // Connection established - now run the Meshtastic handshake
+                manager.requestMtu(MTU_SIZE).suspend()
 
                 // Send wantConfig to initiate the config download
                 val wantConfig = MeshtasticProtos.buildWantConfigPacket()
-                toRadio.write(wantConfig)
+                manager.writeToRadio(wantConfig)
                 Timber.d("Sent wantConfig packet")
 
                 // Read initial config dump from FromRadio
-                readInitialConfig(fromRadio)
+                readInitialConfig(manager)
 
                 _connectionState.value = ConnectionState.CONNECTED
                 Timber.d("Connected to Meshtastic device, ${nodesMap.size} nodes discovered")
 
                 // Subscribe to FromNum notifications for ongoing messages
-                startMessageListener(fromRadio, fromNum)
+                startMessageListener(manager)
 
-                // Monitor connection state
-                gatt.connectionStateWithStatus.collect { (state, status) ->
-                    when (state) {
-                        GattConnectionState.STATE_DISCONNECTED -> {
-                            Timber.d("Disconnected from device (status: $status)")
-                            if (currentAddress != null) {
-                                scheduleReconnect()
-                            }
-                        }
-                        else -> { /* connected or connecting - handled above */ }
-                    }
-                }
             } catch (e: Exception) {
                 Timber.e(e, "Connection failed")
                 _connectionState.value = ConnectionState.DISCONNECTED
@@ -207,11 +200,11 @@ class MeshtasticBleConnection @Inject constructor(
         }
     }
 
-    private suspend fun readInitialConfig(fromRadio: ClientBleGattCharacteristic) {
+    private suspend fun readInitialConfig(manager: MeshtasticBleManager) {
         var configComplete = false
         while (!configComplete) {
-            val data = fromRadio.read()
-            if (data.isEmpty()) break
+            val data = manager.readFromRadio()
+            if (data == null || data.isEmpty()) break
 
             val parsed = MeshtasticProtos.parseFromRadio(data)
             when (parsed) {
@@ -234,19 +227,16 @@ class MeshtasticBleConnection @Inject constructor(
         }
     }
 
-    private fun startMessageListener(
-        fromRadio: ClientBleGattCharacteristic,
-        fromNum: ClientBleGattCharacteristic,
-    ) {
+    private fun startMessageListener(manager: MeshtasticBleManager) {
         readJob?.cancel()
         readJob = scope.launch {
             try {
-                fromNum.getNotifications().collect {
+                manager.fromNumNotifications().collect {
                     // New data available - read all pending FromRadio packets
                     var hasMore = true
                     while (hasMore && isActive) {
-                        val data = fromRadio.read()
-                        if (data.isEmpty()) {
+                        val data = manager.readFromRadio()
+                        if (data == null || data.isEmpty()) {
                             hasMore = false
                         } else {
                             val parsed = MeshtasticProtos.parseFromRadio(data)
@@ -260,6 +250,9 @@ class MeshtasticBleConnection @Inject constructor(
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Message listener error")
+                if (currentAddress != null) {
+                    scheduleReconnect()
+                }
             }
         }
     }
@@ -298,7 +291,6 @@ class MeshtasticBleConnection @Inject constructor(
                 Timber.d("Received message from ${meshPacket.senderName}: $text")
             }
             MeshtasticProtos.PORTNUM_NODEINFO -> {
-                // Parse the embedded User from the data payload
                 try {
                     val input = com.google.protobuf.CodedInputStream.newInstance(decoded.payload)
                     val user = MeshtasticProtos.parseUser(input)
@@ -351,29 +343,23 @@ class MeshtasticBleConnection @Inject constructor(
         reconnectJob?.cancel()
         readJob?.cancel()
         try {
-            gattConnection?.disconnect()
+            bleManager?.disconnect()?.suspend()
         } catch (e: Exception) {
             Timber.e(e, "Disconnect error")
         }
-        gattConnection = null
+        bleManager = null
         _connectionState.value = ConnectionState.DISCONNECTED
         Timber.d("Disconnected from Meshtastic device")
     }
 
     override suspend fun sendMessage(text: String, channel: Int) {
-        val gatt = gattConnection ?: run {
+        val manager = bleManager ?: run {
             Timber.w("Cannot send message - not connected")
             return
         }
         try {
-            val services = gatt.discoverServices()
-            val service = services.findService(MESHTASTIC_SERVICE_UUID)
-            val toRadio = service?.findCharacteristic(TO_RADIO_UUID) ?: run {
-                Timber.e("ToRadio characteristic not found")
-                return
-            }
             val packet = MeshtasticProtos.buildTextMessagePacket(text, channel)
-            toRadio.write(packet)
+            manager.writeToRadio(packet)
             Timber.d("Sent message: $text")
         } catch (e: Exception) {
             Timber.e(e, "Failed to send message")
@@ -381,4 +367,56 @@ class MeshtasticBleConnection @Inject constructor(
     }
 
     override fun getNodeCount(): Int = nodesMap.size
+
+    /**
+     * Inner BleManager subclass implementing the Meshtastic GATT service discovery
+     * and characteristic caching, following the Nordic BLE Library pattern used by
+     * Meshtastic-Android (RadioInterfaceService / BluetoothInterface).
+     */
+    private class MeshtasticBleManager(context: Context) : BleManager(context) {
+
+        private var toRadioChar: BluetoothGattCharacteristic? = null
+        private var fromRadioChar: BluetoothGattCharacteristic? = null
+        private var fromNumChar: BluetoothGattCharacteristic? = null
+
+        override fun isRequiredServiceSupported(gatt: BluetoothGatt): Boolean {
+            val service = gatt.getService(MESHTASTIC_SERVICE_UUID) ?: return false
+            toRadioChar = service.getCharacteristic(TO_RADIO_UUID)
+            fromRadioChar = service.getCharacteristic(FROM_RADIO_UUID)
+            fromNumChar = service.getCharacteristic(FROM_NUM_UUID)
+            return toRadioChar != null && fromRadioChar != null && fromNumChar != null
+        }
+
+        override fun onServicesInvalidated() {
+            toRadioChar = null
+            fromRadioChar = null
+            fromNumChar = null
+        }
+
+        suspend fun writeToRadio(data: ByteArray) {
+            val char = toRadioChar ?: throw IllegalStateException("Not connected")
+            writeCharacteristic(char, data).suspend()
+        }
+
+        suspend fun readFromRadio(): ByteArray? {
+            val char = fromRadioChar ?: return null
+            return readCharacteristic(char).suspend().value
+        }
+
+        fun fromNumNotifications(): Flow<ByteArray> = callbackFlow {
+            val char = fromNumChar ?: run {
+                close()
+                return@callbackFlow
+            }
+
+            setNotificationCallback(char).with { _, data ->
+                data.value?.let { trySend(it) }
+            }
+            enableNotifications(char).suspend()
+
+            awaitClose {
+                disableNotifications(char)
+            }
+        }
+    }
 }

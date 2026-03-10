@@ -52,9 +52,9 @@ dependencies {
     // Karoo Extension SDK
     implementation(libs.karoo.ext)
 
-    // Nordic BLE
-    implementation(libs.nordic.ble.client)
-    implementation(libs.nordic.ble.scanner)
+    // Nordic BLE (same library used by Meshtastic-Android)
+    implementation(libs.nordic.ble)
+    implementation(libs.nordic.ble.ktx)
 
     // Protobuf for Meshtastic packet decoding
     implementation(libs.protobuf.javalite)
