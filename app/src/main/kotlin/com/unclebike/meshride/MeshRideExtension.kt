@@ -10,6 +10,8 @@ import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.PlayBeepPattern
+import io.hammerhead.karooext.models.ReleaseBluetooth
+import io.hammerhead.karooext.models.RequestBluetooth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +41,14 @@ class MeshRideExtension : KarooExtension("meshride", "1") {
         super.onCreate()
         Timber.d("MeshRideExtension created")
 
-        karooSystem = KarooSystemService(this).also { it.connect {} }
+        karooSystem = KarooSystemService(this).also { system ->
+            system.connect { connected ->
+                if (connected) {
+                    system.dispatch(RequestBluetooth(extension))
+                    Timber.d("KarooSystem connected, Bluetooth requested")
+                }
+            }
+        }
 
         // Listen for incoming messages and dispatch in-ride alerts
         scope.launch {
@@ -48,8 +57,12 @@ class MeshRideExtension : KarooExtension("meshride", "1") {
                 karooSystem?.dispatch(
                     InRideAlert(
                         id = "mesh-message-${packet.timestamp}",
-                        detail = "${packet.senderName}: ${packet.messageText}",
+                        icon = R.drawable.ic_mesh,
+                        title = packet.senderName,
+                        detail = packet.messageText,
                         autoDismissMs = 8000,
+                        backgroundColor = R.color.mesh_bg_overlay,
+                        textColor = R.color.mesh_white,
                     )
                 )
             }
@@ -87,6 +100,7 @@ class MeshRideExtension : KarooExtension("meshride", "1") {
 
     override fun onDestroy() {
         scope.cancel()
+        karooSystem?.dispatch(ReleaseBluetooth(extension))
         karooSystem?.disconnect()
         karooSystem = null
         super.onDestroy()

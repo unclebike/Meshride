@@ -3,7 +3,7 @@
     id="meshride"
     displayName="@string/extension_name"
     icon="@drawable/ic_mesh"
-    scansDevices="true">
+    scansDevices="false">
 
     <DataType
         typeId="mesh-node-count"
